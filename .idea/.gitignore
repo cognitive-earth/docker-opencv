@@ -1,0 +1,11 @@
+# Exclude everything inside .idea by default
+*
+!.gitignore
+# Except these important project configuration files
+!modules.xml
+!misc.xml
+!.name
+!vcs.xml
+!*.iml
+# Allow shared run configurations
+!runConfigurations/
