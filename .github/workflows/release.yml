@@ -1,5 +1,4 @@
-# .github/workflows/release.yml
-name: Reuse Node Release Workflow
+name: Node Release
 
 on:
   push:
@@ -8,9 +7,85 @@ on:
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  NODE_VERSION: 22.16.0
+  NPM_VERSION: 11.11.0
 
 jobs:
-  node-release:
-    uses: cognitive-earth/github-actions-workflows/.github/workflows/node-release.yml@master
-    secrets:
-      NPM_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          if [[ "$TAG_NAME" == *-* ]]; then
+            gh release create "$TAG_NAME" --title "Pre-release $TAG_NAME" --prerelease --notes ""
+          else
+            gh release create "$TAG_NAME" --title "Release $TAG_NAME" --notes ""
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  publish-package:
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check token availability
+        id: token-check
+        run: |
+          if [ -n "${{ secrets.NPM_AUTH_TOKEN }}" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "NPM_AUTH_TOKEN is not configured for this repo; skipping npm publish steps"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token-check.outputs.has_token == 'true'
+
+      - name: Check for package-lock.json
+        if: steps.token-check.outputs.has_token == 'true'
+        id: lockfile-check
+        run: |
+          if [ -f "package-lock.json" ]; then
+            echo "has_lock=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_lock=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node with optional cache
+        if: steps.token-check.outputs.has_token == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://npm.pkg.github.com/
+          cache: ${{ steps.lockfile-check.outputs.has_lock == 'true' && 'npm' || '' }}
+
+      - name: Pin npm version
+        if: steps.token-check.outputs.has_token == 'true'
+        run: |
+          npm install -g npm@${NPM_VERSION}
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        if: steps.token-check.outputs.has_token == 'true'
+        run: |
+          if [ "${{ steps.lockfile-check.outputs.has_lock }}" = "true" ]; then
+            npm ci
+          else
+            npm install
+          fi
+        env:
+          GITHUB_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
+
+      - name: Publish Package
+        if: steps.token-check.outputs.has_token == 'true'
+        run: npm publish
+        env:
+          GITHUB_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
