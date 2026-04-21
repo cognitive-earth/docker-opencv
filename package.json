@@ -1,0 +1,30 @@
+{
+  "name": "@cognitive-earth/docker-opencv",
+  "version": "13.0.1",
+  "description": "Manage OpenCV docker image releases",
+  "homepage": "https://github.com/cognitive-earth/docker-opencv#readme",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/cognitive-earth"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cognitive-earth/docker-opencv.git",
+    "directory": "@cognitive-earth/docker-opencv"
+  },
+  "license": "UNLICENSED",
+  "scripts": {
+    "linkDeps": "link-deps --root ../",
+    "test": "echo \"No tests yet\"",
+    "coverage": "echo \"No coverage yet\"",
+    "runAsDocker": "node_modules/@cognitive-earth/framework-release/scripts/runAsDocker.sh",
+    "runAsDockerDebug": "node_modules/@cognitive-earth/framework-release/scripts/runAsDockerDebug.sh",
+    "releasePatch": "node_modules/@cognitive-earth/framework-release/src/release.mjs"
+  },
+  "keywords": [],
+  "author": "James Bangay",
+  "type": "module",
+  "devDependencies": {
+    "@cognitive-earth/framework-release": "^0.0",
+    "@cognitive-earth/framework-testing": "^0.0"
+  }
+}

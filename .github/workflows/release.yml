@@ -1,0 +1,16 @@
+# .github/workflows/release.yml
+name: Reuse Node Release Workflow
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  node-release:
+    uses: cognitive-earth/github-actions-workflows/.github/workflows/node-release.yml@master
+    secrets:
+      NPM_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
