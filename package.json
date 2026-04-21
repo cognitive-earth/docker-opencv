@@ -1,6 +1,6 @@
 {
   "name": "@cognitive-earth/docker-opencv",
-  "version": "13.0.1",
+  "version": "13.0.2",
   "description": "Manage OpenCV docker image releases",
   "homepage": "https://github.com/cognitive-earth/docker-opencv#readme",
   "publishConfig": {
