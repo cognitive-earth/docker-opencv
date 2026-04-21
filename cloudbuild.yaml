@@ -1,0 +1,146 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
+
+substitutions:
+  _TAG_NAME: $TAG_NAME
+  _PUSH_LATEST: "true"
+
+steps:
+  - id: Get Secret
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - "gcloud secrets versions access latest --secret=github_auth_token --format='get(payload.data)' | tr '_-' '/+' | base64 -d > github_auth_token.txt"
+
+  - id: Read Deploy Manifest
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        DEPLOY_MANIFEST_PATH="/workspace/deploy.json"
+        if [ -f "$${DEPLOY_MANIFEST_PATH}" ]; then
+          echo "Detected deploy manifest: $${DEPLOY_MANIFEST_PATH}"
+          cat "$${DEPLOY_MANIFEST_PATH}" >/dev/null
+        else
+          echo "No deploy.json found at $${DEPLOY_MANIFEST_PATH}; continuing"
+        fi
+        printf 'DEPLOY_MANIFEST_PATH=%s\n' "$${DEPLOY_MANIFEST_PATH}" > /workspace/.deploy-manifest.env
+
+  - id: Resolve Workflow Target
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        WORKFLOW_TYPE="docker"
+
+        TYPE_VALUE=$(python3 -c 'import json,pathlib; p=pathlib.Path("/workspace/deploy.json"); d=json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}; t=d.get("type","") if isinstance(d,dict) else ""; print(t if isinstance(t,str) else "")' 2>/dev/null || true)
+
+        case "$${TYPE_VALUE}" in
+          docker|service|spa)
+            WORKFLOW_TYPE="$${TYPE_VALUE}"
+            ;;
+          "")
+            ;;
+          *)
+            echo "Unknown deploy type '$${TYPE_VALUE}'; using default 'docker'"
+            ;;
+        esac
+
+        case "$${WORKFLOW_TYPE}" in
+          docker)
+            WORKFLOW_REPO='https://github.com/cognitive-earth/gcp-release-docker-workflow.git'
+            WORKFLOW_TARGET='/workspace/ext/gcp-release-docker-workflow'
+            WORKFLOW_CONFIG='/workspace/ext/gcp-release-docker-workflow/cloudbuild.yaml'
+            ;;
+          service)
+            WORKFLOW_REPO='https://github.com/cognitive-earth/gcp-release-service-workflow.git'
+            WORKFLOW_TARGET='/workspace/ext/gcp-release-service-workflow'
+            WORKFLOW_CONFIG='/workspace/ext/gcp-release-service-workflow/cloudbuild.yaml'
+            ;;
+          spa)
+            WORKFLOW_REPO='https://github.com/cognitive-earth/gcp-release-spa-workflow.git'
+            WORKFLOW_TARGET='/workspace/ext/gcp-release-spa-workflow'
+            WORKFLOW_CONFIG='/workspace/ext/gcp-release-spa-workflow/cloudbuild.yaml'
+            ;;
+          *)
+            echo "Unsupported workflow type '$${WORKFLOW_TYPE}'"
+            exit 1
+            ;;
+        esac
+
+        printf 'WORKFLOW_TYPE=%s\nWORKFLOW_REPO=%s\nWORKFLOW_TARGET=%s\nWORKFLOW_CONFIG=%s\n' \
+          "$${WORKFLOW_TYPE}" "$${WORKFLOW_REPO}" "$${WORKFLOW_TARGET}" "$${WORKFLOW_CONFIG}" > /workspace/.workflow-target.env
+
+  - id: Clone Selected Workflow
+    name: "gcr.io/cloud-builders/git"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        source /workspace/.workflow-target.env
+
+        TMP_TARGET="$${WORKFLOW_TARGET}.tmp"
+        mkdir -p /workspace/ext
+        rm -rf "$${WORKFLOW_TARGET}" "$${TMP_TARGET}"
+
+        TOKEN=$( < github_auth_token.txt)
+        AUTH_HEADER=$(printf 'x-access-token:%s' "$$TOKEN" | base64 | tr -d '\n')
+        git -c credential.helper= \
+          -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $${AUTH_HEADER}" \
+          clone "$${WORKFLOW_REPO}" "$${TMP_TARGET}"
+
+        mv "$${TMP_TARGET}" "$${WORKFLOW_TARGET}"
+
+  - id: Run Selected Workflow
+    name: "gcr.io/cloud-builders/gcloud"
+    entrypoint: "bash"
+    env:
+      - 'SUB_TAG_NAME=$_TAG_NAME'
+      - 'SUB_PUSH_LATEST=$_PUSH_LATEST'
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+        source /workspace/.workflow-target.env
+
+        SHARED_CONFIG="$${WORKFLOW_CONFIG}"
+        [ -f "$${SHARED_CONFIG}" ] || { echo "Shared config missing at $${SHARED_CONFIG}"; ls -la /workspace/ext || true; exit 1; }
+
+        WORKFLOW_INPUT_REPO_NAME=$(python3 -c 'import json,pathlib; p=pathlib.Path("/workspace/deploy.json"); d=json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}; pick=lambda *vs: next((v.strip() for v in vs if isinstance(v,str) and v.strip()), ""); a=d.get("artifact") if isinstance(d.get("artifact"),dict) else {}; s=d.get("service") if isinstance(d.get("service"),dict) else {}; dk=d.get("docker") if isinstance(d.get("docker"),dict) else {}; print(pick(a.get("repository"),s.get("repoName"),dk.get("repoName"),d.get("repoName"),""))' 2>/dev/null || true)
+        WORKFLOW_INPUT_REPO_PATH=$(python3 -c 'import json,pathlib; p=pathlib.Path("/workspace/deploy.json"); d=json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}; a=d.get("artifact") if isinstance(d.get("artifact"),dict) else {}; img=a.get("imagePath"); out=(f"{img.strip().split("/")[0]}/{img.strip().split("/")[1]}" if isinstance(img,str) and img.strip() and len(img.strip().split("/"))>=2 else ""); region=a.get("region"); proj=a.get("registryProject"); out=(f"{region}-docker.pkg.dev/{proj}" if (not out) and isinstance(region,str) and region.strip() and isinstance(proj,str) and proj.strip() else out); print(out)' 2>/dev/null || true)
+        WORKFLOW_INPUT_ENVIRONMENT=$(python3 -c 'import json,pathlib; p=pathlib.Path("/workspace/deploy.json"); d=json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}; pick=lambda *vs: next((v.strip() for v in vs if isinstance(v,str) and v.strip()), ""); s=d.get("service") if isinstance(d.get("service"),dict) else {}; r=d.get("runtime") if isinstance(d.get("runtime"),dict) else {}; dk=d.get("docker") if isinstance(d.get("docker"),dict) else {}; print(pick(s.get("appEnvironment"),r.get("appEnvironment"),dk.get("environment"),d.get("environment"),"production"))' 2>/dev/null || echo "production")
+        WORKFLOW_INPUT_NODE_VERSION=$(python3 -c 'import json,pathlib; p=pathlib.Path("/workspace/deploy.json"); d=json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}; pick=lambda *vs: next((v.strip() for v in vs if isinstance(v,str) and v.strip()), ""); s=d.get("spa") if isinstance(d.get("spa"),dict) else {}; r=d.get("runtime") if isinstance(d.get("runtime"),dict) else {}; print(pick(s.get("nodeVersion"),r.get("nodeVersion"),"22.16.0"))' 2>/dev/null || echo "22.16.0")
+        WORKFLOW_INPUT_NPM_VERSION=$(python3 -c 'import json,pathlib; p=pathlib.Path("/workspace/deploy.json"); d=json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}; pick=lambda *vs: next((v.strip() for v in vs if isinstance(v,str) and v.strip()), ""); s=d.get("spa") if isinstance(d.get("spa"),dict) else {}; r=d.get("runtime") if isinstance(d.get("runtime"),dict) else {}; print(pick(s.get("npmVersion"),r.get("npmVersion"),"11.11.0"))' 2>/dev/null || echo "11.11.0")
+
+        [ -n "$${WORKFLOW_INPUT_REPO_NAME}" ] || WORKFLOW_INPUT_REPO_NAME="$(basename /workspace)"
+        [ -n "$${WORKFLOW_INPUT_REPO_PATH}" ] || WORKFLOW_INPUT_REPO_PATH="australia-southeast1-docker.pkg.dev/cognitive-code"
+
+        case "$${WORKFLOW_TYPE}" in
+          docker)
+            SUBSTITUTIONS="_TAG_NAME=$${SUB_TAG_NAME},_PUSH_LATEST=$${SUB_PUSH_LATEST}"
+            ;;
+          service)
+            SUBSTITUTIONS="_REPO_PATH=$${WORKFLOW_INPUT_REPO_PATH},_REPO_NAME=$${WORKFLOW_INPUT_REPO_NAME},_TAG_NAME=$${SUB_TAG_NAME},_ENVIRONMENT=$${WORKFLOW_INPUT_ENVIRONMENT}"
+            ;;
+          spa)
+            SUBSTITUTIONS="_REPO_NAME=$${WORKFLOW_INPUT_REPO_NAME},_NODE_VERSION=$${WORKFLOW_INPUT_NODE_VERSION},_NPM_VERSION=$${WORKFLOW_INPUT_NPM_VERSION}"
+            ;;
+          *)
+            echo "Unsupported workflow type '$${WORKFLOW_TYPE}'"
+            exit 1
+            ;;
+        esac
+
+        gcloud builds submit /workspace \
+          --config "$${SHARED_CONFIG}" \
+          --project "$PROJECT_ID" \
+          --substitutions "$${SUBSTITUTIONS}"
+
+timeout: "3600s"

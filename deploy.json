@@ -1,0 +1,23 @@
+{
+  "$schema": "https://cognitive-earth/schemas/deploy.v1.json",
+  "kind": "cognitive-earth.deploy.v1",
+  "type": "docker",
+  "source": {
+    "localRepoPath": "/home/jbangay/cognitiveEarth/docker-opencv"
+  },
+  "docker": {
+    "repoName": "opencv",
+    "environment": "production"
+  },
+  "artifact": {
+    "registryProject": "cognitive-code",
+    "region": "australia-southeast1",
+    "repository": "opencv",
+    "imagePath": "australia-southeast1-docker.pkg.dev/cognitive-code/opencv/main",
+    "pushLatest": true,
+    "build": {
+      "dockerfile": "Dockerfile",
+      "context": "."
+    }
+  }
+}
