@@ -3,7 +3,7 @@
   "kind": "cognitive-earth.deploy.v1",
   "type": "docker",
   "source": {
-    "localRepoPath": "/home/jbangay/cognitiveEarth/docker-opencv"
+    "localRepoPath": "."
   },
   "docker": {
     "repoName": "opencv",
@@ -19,5 +19,8 @@
       "dockerfile": "Dockerfile",
       "context": "."
     }
+  },
+  "frameworkRelease": {
+    "version": "0.0.93"
   }
 }
