@@ -20,6 +20,11 @@
       "context": "."
     }
   },
+  "release": {
+    "cloudBuild": {
+      "controlPlane": "github-release-automation"
+    }
+  },
   "frameworkRelease": {
     "version": "0.0.93"
   }
