@@ -13,7 +13,6 @@
   },
   "license": "UNLICENSED",
   "scripts": {
-    "linkDeps": "link-deps --root ../",
     "test": "echo \"No tests yet\"",
     "coverage": "echo \"No coverage yet\"",
     "runAsDocker": "node_modules/@cognitive-earth/framework-release/scripts/runAsDocker.sh",
